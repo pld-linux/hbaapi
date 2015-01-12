@@ -1,0 +1,256 @@
+--- hbaapi_src_2.2/HBAAPILIB.c.orig	2003-02-27 20:24:19.000000000 +0100
++++ hbaapi_src_2.2/HBAAPILIB.c	2015-01-12 21:03:10.701685340 +0100
+@@ -30,7 +30,6 @@
+ 
+ #ifdef WIN32
+ #include <windows.h>
+-#include <string.h>
+ /*
+  * Next define forces entry points in the dll to be exported
+  * See hbaapi.h to see what it does.
+@@ -38,8 +37,9 @@
+ #define HBAAPI_EXPORTS
+ #else
+ #include <dlfcn.h>
+-#include <strings.h>
++#define _XOPEN_SOURCE
+ #endif
++#include <string.h>
+ #include <stdio.h>
+ #include <time.h>
+ #include "hbaapi.h"
+@@ -2678,7 +2678,7 @@ HBA_SendRLS (
+     HBASendRLSFunc registeredfunc;
+     
+     DEBUG(2, "HBA_SendRLS dest_wwn: %s",
+-	  WWN2STR(&destWWN), 0, 0);
++	  WWN2STR1(&destWWN), 0, 0);
+     
+     CHECKLIBRARY();
+     registeredfunc = lib_infop->functionTable.SendRLSHandler;
+--- hbaapi_src_2.2/hbaapitest.c.orig	2002-06-07 18:26:36.000000000 +0200
++++ hbaapi_src_2.2/hbaapitest.c	2015-01-12 20:57:59.631698273 +0100
+@@ -28,6 +28,7 @@
+ 
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #ifndef WIN32
+ #include <dlfcn.h> /* Dynamic library support for Solaris */
+ #include <time.h>
+--- hbaapi_src_2.2/hbasample.c.orig	2003-02-27 20:36:39.000000000 +0100
++++ hbaapi_src_2.2/hbasample.c	2015-01-12 20:54:23.765040663 +0100
+@@ -31,6 +31,8 @@
+ #ifdef WIN32
+ #include <windows.h>
+ #endif
++#include <stdlib.h>
++#include <string.h>
+ #include <time.h>
+ #include "hbaapi.h"
+ #include "vendorhbaapi.h"
+@@ -66,51 +68,6 @@ BOOL APIENTRY DllMain( HANDLE hModule,
+  * Rev2 structure
+  */
+ 
+-/*
+- * Rev1 Code will call this function and only get the Rev1 registration.
+- * This prevents overrunning the data structure.
+- */
+-HBASAMPLE_API HBA_STATUS 
+-HBA_RegisterLibrary(HBA_ENTRYPOINTS *entrypoints ) {
+-    
+-    entrypoints->GetVersionHandler = Sample_GetVersion;
+-    entrypoints->LoadLibraryHandler = Sample_LoadLibrary;
+-    entrypoints->FreeLibraryHandler = Sample_FreeLibrary;
+-    entrypoints->GetNumberOfAdaptersHandler = Sample_GetNumberOfAdapters;
+-    entrypoints->GetAdapterNameHandler = Sample_GetAdapterName;
+-    entrypoints->OpenAdapterHandler = Sample_OpenAdapter;
+-    entrypoints->OpenAdapterByWWNHandler = Sample_OpenAdapterByWWN;
+-    entrypoints->CloseAdapterHandler = Sample_CloseAdapter;
+-    entrypoints->GetAdapterAttributesHandler = Sample_GetAdapterAttributes;
+-    entrypoints->GetAdapterPortAttributesHandler = Sample_GetAdapterPortAttributes;
+-    entrypoints->GetPortStatisticsHandler = Sample_GetPortStatistics;
+-    entrypoints->GetDiscoveredPortAttributesHandler = 
+-	Sample_GetDiscoveredPortAttributes;
+-    entrypoints->GetPortAttributesByWWNHandler = Sample_GetPortAttributesByWWN;
+-    entrypoints->RefreshInformationHandler = Sample_RefreshInformation;
+-    entrypoints->RegisterForAdapterEventsHandler = Sample_RegisterForAdapterEvents;
+-    /* There are a lot more entry points to register, however this is just
+-     * busy work.  You get the idea.  */
+-    
+-    return 0;
+-}
+-/*
+- * Here is were Rev2 callers will try first (all done by the wrapper library),
+- * If the machine has not Rev2 vendor library, then obviosly, this function
+- * will not be found.
+- */
+-HBASAMPLE_API HBA_STATUS
+-HBA_RegisterLibraryV2(HBA_ENTRYPOINTSV2 *entrypoints) {
+-
+-    /* have the old function do the Rev1 part */
+-    (void) HBA_RegisterLibrary((HBA_ENTRYPOINTS *)entrypoints);
+-
+-    entrypoints->SendCTPassThruV2Handler = Sample_SendCTPassThruV2;
+-    /* so on and so forth */
+-
+-    return 0
+-}
+-
+ void
+ Sample_RemoveCallback() {
+     
+@@ -164,7 +121,7 @@ Sample_OpenAdapter(char* adaptername	){
+ }
+ 
+ HBA_STATUS
+-Sample_OpenAdapterByWWN(HBA_HANDLE handle, HBA_WWN wwn){
++Sample_OpenAdapterByWWN(HBA_HANDLE *handle, HBA_WWN wwn){
+     /*
+      * WARNING WARNING, Danger Will Robinson,
+      * The wrapper library will mask the handle of this function to
+@@ -173,7 +130,7 @@ Sample_OpenAdapterByWWN(HBA_HANDLE handl
+     HBA_HANDLE temp;
+     HBA_WWN	twwn = {1,2,3,4,5,6,7,8};
+     
+-    if (memcmp(wwn, twwn) == 0) {
++    if (memcmp(&wwn, &twwn, sizeof(HBA_WWN)) == 0) {
+ 	return HBA_STATUS_OK;
+     } 
+     return HBA_STATUS_ERROR_ILLEGAL_WWN;
+@@ -307,8 +264,13 @@ void Sample_RefreshInformation(HBA_HANDL
+ }
+ static void *eventhandlerdata;
+ 
++typedef struct {
++	void *userdata;
++	void (*callbackfunc)(void *data, HBA_WWN PortWWN, HBA_UINT32 eventType);
++} CBHANDLE;
++
+ HBA_STATUS Sample_RegisterForAdapterEvents(
+-    (void (*callback)(
++    void (*callback)(
+ 	void *data,
+ 	HBA_WWN PortWWN,
+ 	HBA_UINT32 eventType),
+@@ -316,7 +278,7 @@ HBA_STATUS Sample_RegisterForAdapterEven
+      HBA_HANDLE handle,
+      HBA_CALLBACKHANDLE *callbackHandle)
+ {
+-    ptr = calloc();
++    CBHANDLE *ptr = calloc(sizeof(CBHANDLE), 1);
+     ptr->userdata = userData;
+     ptr->callbackfunc = callback;
+     /* store away a pointer to this data,
+@@ -337,9 +299,9 @@ event()
+ {
+     HBA_UINT64 port = 0x12345678;
+     HBA_WWN PortWWN;
+-    ptr = eventhandlerdata;
++    CBHANDLE *ptr = eventhandlerdata;
+     memcpy(&PortWWN, &port, 8);
+-    (*ptr->callvackfunc)(ptr->userdata, PortWWN, HBA_EVENT_ADAPTER_CHANGE);
++    (*ptr->callbackfunc)(ptr->userdata, PortWWN, HBA_EVENT_ADAPTER_CHANGE);
+ }
+  
+ 
+@@ -367,3 +329,49 @@ HBA_STATUS Sample_HBA_GetFcpTargetMappin
+     )
+ {
+ }
++
++/*
++ * Rev1 Code will call this function and only get the Rev1 registration.
++ * This prevents overrunning the data structure.
++ */
++HBASAMPLE_API HBA_STATUS 
++HBA_RegisterLibrary(HBA_ENTRYPOINTS *entrypoints ) {
++    
++    entrypoints->GetVersionHandler = Sample_GetVersion;
++    entrypoints->LoadLibraryHandler = Sample_LoadLibrary;
++    entrypoints->FreeLibraryHandler = Sample_FreeLibrary;
++    entrypoints->GetNumberOfAdaptersHandler = Sample_GetNumberOfAdapters;
++    entrypoints->GetAdapterNameHandler = Sample_GetAdapterName;
++    entrypoints->OpenAdapterHandler = Sample_OpenAdapter;
++    entrypoints->CloseAdapterHandler = Sample_CloseAdapter;
++    entrypoints->GetAdapterAttributesHandler = Sample_GetAdapterAttributes;
++    entrypoints->GetAdapterPortAttributesHandler = Sample_GetAdapterPortAttributes;
++    entrypoints->GetPortStatisticsHandler = Sample_GetPortStatistics;
++    entrypoints->GetDiscoveredPortAttributesHandler = 
++	Sample_GetDiscoveredPortAttributes;
++    entrypoints->GetPortAttributesByWWNHandler = Sample_GetPortAttributesByWWN;
++    entrypoints->RefreshInformationHandler = Sample_RefreshInformation;
++    /* There are a lot more entry points to register, however this is just
++     * busy work.  You get the idea.  */
++    
++    return 0;
++}
++/*
++ * Here is were Rev2 callers will try first (all done by the wrapper library),
++ * If the machine has not Rev2 vendor library, then obviosly, this function
++ * will not be found.
++ */
++HBASAMPLE_API HBA_STATUS
++HBA_RegisterLibraryV2(HBA_ENTRYPOINTSV2 *entrypoints) {
++
++    /* have the old function do the Rev1 part */
++    (void) HBA_RegisterLibrary((HBA_ENTRYPOINTS *)entrypoints);
++
++    entrypoints->OpenAdapterByWWNHandler = Sample_OpenAdapterByWWN;
++    entrypoints->RegisterForAdapterEventsHandler = Sample_RegisterForAdapterEvents;
++/*  entrypoints->SendCTPassThruV2Handler = Sample_SendCTPassThruV2; */
++    /* so on and so forth */
++
++    return 0;
++}
++
+--- hbaapi_src_2.2/makefile.unix.orig	2015-01-12 16:39:53.062348179 +0100
++++ hbaapi_src_2.2/makefile.unix	2015-01-12 18:17:29.898769093 +0100
+@@ -40,17 +40,13 @@ endif
+ 
+ define VERS
+ 	@rm -f version.c
+-	@/bin/echo "#ident \"@(#) ${VERSION} \c" > version.c
+-	@/bin/echo `date "+%m/%d/%y %H:%M:%S"` " \c" >> version.c
+-	@/bin/echo "Subject to SNIA Public License\"" >> version.c
+-	@/bin/echo "#ident \""$$\Id:"${VERSION} \c" >> version.c
+-	@/bin/echo `date "+%m/%d/%y %H:%M:%S"` " \c" >> version.c
+-	@/bin/echo "Subject to SNIA Public License $$\"" >> version.c
+-	@$(COMPILE.c) version.c > /dev/null 2>&1
++	@/bin/echo "#ident \"@(#) ${VERSION}" `date "+%m/%d/%y %H:%M:%S"` " Subject to SNIA Public License\"" >> version.c
++	@/bin/echo "#ident \""$$\Id:"${VERSION}" `date "+%m/%d/%y %H:%M:%S"` " Subject to SNIA Public License $$\"" >> version.c
++	$(COMPILE.c) ${OPT} version.c
+ 	@rm -f version.c
+ endef
+ 
+-CFLAGS = -DPOSIX_THREADS=POSIX_THREADS -DUSESYSLOG=USESYSLOG -DUSELOGFILE=USELOGFILE
++CFLAGS = $(OPT) -DPOSIX_THREADS=POSIX_THREADS -DUSESYSLOG=USESYSLOG -DUSELOGFILE=USELOGFILE
+ 
+ 
+ all: hbasample hbaapitest
+@@ -60,20 +56,20 @@ hbatest: hbaapi.h
+ 
+ libHBAAPI.so: HBAAPILIB.c hbaapi.h vendorhbaapi.h
+ 	${VERS}
+-	${CC} HBAAPILIB.c  version.o ${CFLAGS} -DBUILD_DATE=\"'${BUILD_DATE}'\" -G -o libHBAAPI.so
++	${CC} -shared HBAAPILIB.c  version.o ${CFLAGS} -DBUILD_DATE=\"'${BUILD_DATE}'\" -o libHBAAPI.so -ldl
+ 	@rm version.o
+ 
+ test: FORCE
+ 	${CC} -DBUILD_DATE=\"'${BUILD_DATE}'\" test.c -o test
+ 
+ hbasample: hbaapi.h libHBAAPI.so vendorhbaapi.h
+-	${CC} hbasample.c -G -o hbasample.so
++	${CC} hbasample.c ${OPT} -shared -o hbasample.so
+ 
+ hbaapitest.o: hbaapitest.c
+-	${CC} -c hbaapitest.c
++	${CC} ${OPT} -c hbaapitest.c
+ 
+ hbaapitest: hbaapitest.o libHBAAPI.so
+-	${CC} hbaapitest.o -ldl libHBAAPI.so -o hbaapitest
++	${CC} ${OPT} hbaapitest.o -ldl libHBAAPI.so -o hbaapitest
+ 
+ FORCE:
+ 
