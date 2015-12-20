@@ -2,7 +2,7 @@ Summary:	Fibre Channel HBA API Project
 Summary(pl.UTF-8):	Projekt API dla kart kontrolerów światłowodowych
 Name:		hbaapi
 Version:	2.2
-Release:	1
+Release:	2
 License:	SNIA Public License v1.0
 Group:		Libraries
 Source0:	http://downloads.sourceforge.net/hbaapi/%{name}_src_%{version}.tgz
