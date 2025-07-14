@@ -46,7 +46,7 @@ Pliki nagłówkowe HBA API.
 
 %prep
 %setup -q -n hbaapi_src_%{version}
-%patch0 -p1
+%patch -P0 -p1
 
 %build
 %{__make} -f makefile.unix \
